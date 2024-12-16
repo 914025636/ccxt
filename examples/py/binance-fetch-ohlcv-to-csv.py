@@ -13,6 +13,37 @@ import ccxt  # noqa: E402
 
 
 # -----------------------------------------------------------------------------
+class MyBinance(ccxt.binance):
+    def parse_ohlcv(self, ohlcv, market=None):
+        #Date,Time,Open,High,Low,Close,Volume,OpenInterest
+        #2006-01-02,09:05:00,3578.73,3587.88,3578.73,3582.99,0,0
+        #
+        #     [
+        #         1591478520000,
+        #         "0.02501300",
+        #         "0.02501800",
+        #         "0.02500000",
+        #         "0.02500000",
+        #         "22.19000000",
+        #         1591478579999,
+        #         "0.55490906",
+        #         40,
+        #         "10.92900000",
+        #         "0.27336462",
+        #         "0"
+        #     ]
+        #
+        return [
+            self.safe_integer(ohlcv, 0),
+            self.iso8601(self.safe_integer(ohlcv, 0))[:10],
+            self.iso8601(self.safe_integer(ohlcv, 0))[11:19],
+            self.safe_number(ohlcv, 1),
+            self.safe_number(ohlcv, 2),
+            self.safe_number(ohlcv, 3),
+            self.safe_number(ohlcv, 4),
+            self.safe_number(ohlcv, 5),
+            0,
+        ]
 
 def retry_fetch_ohlcv(exchange, max_retries, symbol, timeframe, since, limit):
     num_retries = 0
@@ -45,14 +76,20 @@ def scrape_ohlcv(exchange, max_retries, symbol, timeframe, since, limit):
 
 
 def write_to_csv(filename, data):
-    with open(filename, mode='w') as output_file:
+    with open(filename, mode='w',newline='') as output_file:
+
         csv_writer = csv.writer(output_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        #遍历data,删除第一列
+        for i in range(len(data)):
+            del data[i][0]
+        #添加一行Date,Time,Open,High,Low,Close,Volume,OpenInterest
+        data.insert(0, ['Date', 'Time', 'Open', 'High', 'Low', 'Close', 'Volume', 'OpenInterest'])
         csv_writer.writerows(data)
 
 
 def scrape_candles_to_csv(filename, exchange_id, max_retries, symbol, timeframe, since, limit):
     # instantiate the exchange by id
-    exchange = getattr(ccxt, exchange_id)()
+    exchange = MyBinance()
     # convert since from string to milliseconds integer if needed
     if isinstance(since, str):
         since = exchange.parse8601(since)
@@ -61,10 +98,10 @@ def scrape_candles_to_csv(filename, exchange_id, max_retries, symbol, timeframe,
     # fetch all candles
     ohlcv = scrape_ohlcv(exchange, max_retries, symbol, timeframe, since, limit)
     # save them to csv file
-    write_to_csv(filename, ohlcv)
     print('Saved', len(ohlcv), 'candles from', exchange.iso8601(ohlcv[0][0]), 'to', exchange.iso8601(ohlcv[-1][0]), 'to', filename)
+    write_to_csv(filename, ohlcv)
 
 
 # -----------------------------------------------------------------------------
 # Binance's BTC/USDT candles start on 2017-08-17
-scrape_candles_to_csv('binance.csv', 'binance', 3, 'BTC/USDT', '1m', '2017-08-17T00:00:00Z', 100)
+scrape_candles_to_csv('binance.csv', 'binance', 3, 'BTC/USDT', '5m', '2024-12-15T00:00:00Z', 100)
