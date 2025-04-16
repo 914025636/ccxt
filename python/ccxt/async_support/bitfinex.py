@@ -7,7 +7,7 @@ from ccxt.async_support.base.exchange import Exchange
 from ccxt.abstract.bitfinex import ImplicitAPI
 import asyncio
 import hashlib
-from ccxt.base.types import Balances, Currencies, Currency, DepositAddress, Int, LedgerEntry, MarginModification, Market, Num, Order, OrderBook, OrderRequest, OrderSide, OrderType, Str, Strings, Ticker, Tickers, FundingRate, FundingRates, Trade, TradingFees, Transaction, TransferEntry
+from ccxt.base.types import Any, Balances, Currencies, Currency, DepositAddress, Int, LedgerEntry, MarginModification, Market, Num, Order, OrderBook, OrderRequest, OrderSide, OrderType, Str, Strings, Ticker, Tickers, FundingRate, FundingRates, Trade, TradingFees, Transaction, TransferEntry
 from typing import List
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import AuthenticationError
@@ -32,7 +32,7 @@ from ccxt.base.precise import Precise
 
 class bitfinex(Exchange, ImplicitAPI):
 
-    def describe(self):
+    def describe(self) -> Any:
         return self.deep_extend(super(bitfinex, self).describe(), {
             'id': 'bitfinex',
             'name': 'Bitfinex',
@@ -101,6 +101,7 @@ class bitfinex(Exchange, ImplicitAPI):
                 'fetchOHLCV': True,
                 'fetchOpenInterest': True,
                 'fetchOpenInterestHistory': True,
+                'fetchOpenInterests': True,
                 'fetchOpenOrder': True,
                 'fetchOpenOrders': True,
                 'fetchOrder': True,
@@ -418,6 +419,83 @@ class bitfinex(Exchange, ImplicitAPI):
                 },
                 'networksById': {
                     'TETHERUSE': 'ERC20',
+                },
+            },
+            'features': {
+                'default': {
+                    'sandbox': False,
+                    'createOrder': {
+                        'marginMode': True,
+                        'triggerPrice': True,
+                        'triggerPriceType': None,
+                        'triggerDirection': False,
+                        'stopLossPrice': True,
+                        'takeProfitPrice': True,
+                        'attachedStopLossTakeProfit': None,
+                        'timeInForce': {
+                            'IOC': True,
+                            'FOK': True,
+                            'PO': True,
+                            'GTD': False,
+                        },
+                        'hedged': False,
+                        'trailing': True,  # todo: implement
+                        'leverage': True,  # todo: implement
+                        'marketBuyRequiresPrice': False,
+                        'marketBuyByCost': True,
+                        'selfTradePrevention': False,
+                        'iceberg': False,
+                    },
+                    'createOrders': {
+                        'max': 75,
+                    },
+                    'fetchMyTrades': {
+                        'marginMode': False,
+                        'limit': 2500,
+                        'daysBack': None,
+                        'untilDays': 100000,  # todo: implement
+                        'symbolRequired': False,
+                    },
+                    'fetchOrder': {
+                        'marginMode': False,
+                        'trigger': False,
+                        'trailing': False,
+                        'symbolRequired': False,
+                    },
+                    'fetchOpenOrders': {
+                        'marginMode': False,
+                        'limit': None,
+                        'trigger': False,
+                        'trailing': False,
+                        'symbolRequired': False,
+                    },
+                    'fetchOrders': None,
+                    'fetchClosedOrders': {
+                        'marginMode': False,
+                        'limit': None,
+                        'daysBack': None,
+                        'daysBackCanceled': None,
+                        'untilDays': 100000,
+                        'trigger': False,
+                        'trailing': False,
+                        'symbolRequired': False,
+                    },
+                    'fetchOHLCV': {
+                        'limit': 10000,
+                    },
+                },
+                'spot': {
+                    'extends': 'default',
+                },
+                'swap': {
+                    'linear': {
+                        'extends': 'default',
+                    },
+                    'inverse': None,
+                },
+                'future': {
+                    'linear': None,
+                    'inverse': None,
                 },
             },
             'exceptions': {
@@ -1063,7 +1141,8 @@ class bitfinex(Exchange, ImplicitAPI):
             signedAmount = self.safe_string(order, 2)
             amount = Precise.string_abs(signedAmount)
             side = 'bids' if Precise.string_gt(signedAmount, '0') else 'asks'
-            result[side].append([price, self.parse_number(amount)])
+            resultSide = result[side]
+            resultSide.append([price, self.parse_number(amount)])
         result['bids'] = self.sort_by(result['bids'], 0, True)
         result['asks'] = self.sort_by(result['asks'], 0)
         return result
@@ -1484,10 +1563,10 @@ class bitfinex(Exchange, ImplicitAPI):
                 if flags[i] == 'postOnly':
                     postOnly = True
         price = self.safe_string(orderList, 16)
-        stopPrice = None
+        triggerPrice = None
         if (orderType == 'EXCHANGE STOP') or (orderType == 'EXCHANGE STOP LIMIT'):
             price = None
-            stopPrice = self.safe_string(orderList, 16)
+            triggerPrice = self.safe_string(orderList, 16)
             if orderType == 'EXCHANGE STOP LIMIT':
                 price = self.safe_string(orderList, 19)
         status = None
@@ -1510,8 +1589,7 @@ class bitfinex(Exchange, ImplicitAPI):
             'postOnly': postOnly,
             'side': side,
             'price': price,
-            'stopPrice': stopPrice,
-            'triggerPrice': stopPrice,
+            'triggerPrice': triggerPrice,
             'amount': amount,
             'cost': None,
             'average': average,
@@ -1532,7 +1610,7 @@ class bitfinex(Exchange, ImplicitAPI):
         :param float amount: how much you want to trade in units of the base currency
         :param float [price]: the price of the order, in units of the quote currency, ignored in market orders
         :param dict [params]: extra parameters specific to the exchange API endpoint
-        :param float [params.stopPrice]: The price at which a trigger order is triggered at
+        :param float [params.triggerPrice]: The price at which a trigger order is triggered at
         :param str [params.timeInForce]: "GTC", "IOC", "FOK", or "PO"
         :param bool [params.postOnly]:
         :param bool [params.reduceOnly]: Ensures that the executed order does not flip the opened position.
@@ -1550,7 +1628,7 @@ class bitfinex(Exchange, ImplicitAPI):
             'symbol': market['id'],
             'amount': amountString,
         }
-        stopPrice = self.safe_string_2(params, 'stopPrice', 'triggerPrice')
+        triggerPrice = self.safe_string_2(params, 'stopPrice', 'triggerPrice')
         trailingAmount = self.safe_string(params, 'trailingAmount')
         timeInForce = self.safe_string(params, 'timeInForce')
         postOnlyParam = self.safe_bool(params, 'postOnly', False)
@@ -1560,9 +1638,9 @@ class bitfinex(Exchange, ImplicitAPI):
         if trailingAmount is not None:
             orderType = 'TRAILING STOP'
             request['price_trailing'] = trailingAmount
-        elif stopPrice is not None:
+        elif triggerPrice is not None:
             # request['price'] is taken for stop orders
-            request['price'] = self.price_to_precision(symbol, stopPrice)
+            request['price'] = self.price_to_precision(symbol, triggerPrice)
             if type == 'limit':
                 orderType = 'STOP LIMIT'
                 request['price_aux_limit'] = self.price_to_precision(symbol, price)
@@ -1575,7 +1653,7 @@ class bitfinex(Exchange, ImplicitAPI):
             raise InvalidOrder(self.id + ' createOrder() requires a price argument with IOC and FOK orders')
         if (ioc or fok) and (type == 'market'):
             raise InvalidOrder(self.id + ' createOrder() does not allow market IOC and FOK orders')
-        if (type != 'market') and (stopPrice is None):
+        if (type != 'market') and (triggerPrice is None):
             request['price'] = self.price_to_precision(symbol, price)
         if ioc:
             orderType = 'IOC'
@@ -1612,7 +1690,7 @@ class bitfinex(Exchange, ImplicitAPI):
         :param float amount: the amount of currency to trade
         :param float [price]: price of the order
         :param dict [params]: extra parameters specific to the exchange API endpoint
-        :param float [params.stopPrice]: the price that triggers a trigger order
+        :param float [params.triggerPrice]: the price that triggers a trigger order
         :param str [params.timeInForce]: "GTC", "IOC", "FOK", or "PO"
         :param boolean [params.postOnly]: set to True if you want to make a post only order
         :param boolean [params.reduceOnly]: indicates that the order is to reduce the size of a position
@@ -2125,7 +2203,7 @@ class bitfinex(Exchange, ImplicitAPI):
             tradesList.append({'result': response[i]})  # convert to array of dicts to match parseOrder signature
         return self.parse_trades(tradesList, market, since, limit)
 
-    async def create_deposit_address(self, code: str, params={}):
+    async def create_deposit_address(self, code: str, params={}) -> DepositAddress:
         """
         create a currency deposit address
 
@@ -2850,7 +2928,7 @@ class bitfinex(Exchange, ImplicitAPI):
         :param dict [params]: extra parameters specific to the exchange API endpoint
         :param int [params.until]: timestamp in ms of the latest ledger entry
         :param boolean [params.paginate]: default False, when True will automatically paginate by calling self endpoint multiple times. See in the docs all the [available parameters](https://github.com/ccxt/ccxt/wiki/Manual#pagination-params)
-        :returns dict: a `ledger structure <https://docs.ccxt.com/#/?id=ledger-structure>`
+        :returns dict: a `ledger structure <https://docs.ccxt.com/#/?id=ledger>`
         """
         await self.load_markets()
         paginate = False
@@ -2940,7 +3018,7 @@ class bitfinex(Exchange, ImplicitAPI):
         #       ]
         #   ]
         #
-        return self.parse_funding_rates(response)
+        return self.parse_funding_rates(response, symbols)
 
     async def fetch_funding_rate_history(self, symbol: Str = None, since: Int = None, limit: Int = None, params={}):
         """
@@ -3118,6 +3196,57 @@ class bitfinex(Exchange, ImplicitAPI):
             'previousFundingDatetime': None,
         }
 
+    async def fetch_open_interests(self, symbols: Strings = None, params={}):
+        """
+        Retrieves the open interest for a list of symbols
+
+        https://docs.bitfinex.com/reference/rest-public-derivatives-status
+
+        :param str[] [symbols]: a list of unified CCXT market symbols
+        :param dict [params]: exchange specific parameters
+        :returns dict[]: a list of `open interest structures <https://docs.ccxt.com/#/?id=open-interest-structure>`
+        """
+        await self.load_markets()
+        symbols = self.market_symbols(symbols)
+        marketIds = ['ALL']
+        if symbols is not None:
+            marketIds = self.market_ids(symbols)
+        request: dict = {
+            'keys': ','.join(marketIds),
+        }
+        response = await self.publicGetStatusDeriv(self.extend(request, params))
+        #
+        #     [
+        #         [
+        #             "tXRPF0:USTF0",  # market id
+        #             1706256986000,   # millisecond timestamp
+        #             null,
+        #             0.512705,        # derivative mid price
+        #             0.512395,        # underlying spot mid price
+        #             null,
+        #             37671483.04,     # insurance fund balance
+        #             null,
+        #             1706284800000,   # timestamp of next funding
+        #             0.00002353,      # accrued funding for next period
+        #             317,             # next funding step
+        #             null,
+        #             0,               # current funding
+        #             null,
+        #             null,
+        #             0.5123016,       # mark price
+        #             null,
+        #             null,
+        #             2233562.03115,   # open interest in contracts
+        #             null,
+        #             null,
+        #             null,
+        #             0.0005,          # average spread without funding payment
+        #             0.0025           # funding payment cap
+        #         ]
+        #     ]
+        #
+        return self.parse_open_interests(response, symbols)
+
     async def fetch_open_interest(self, symbol: str, params={}):
         """
         retrieves the open interest of a contract trading pair
@@ -3226,7 +3355,7 @@ class bitfinex(Exchange, ImplicitAPI):
         #         ],
         #     ]
         #
-        return self.parse_open_interests(response, market, since, limit)
+        return self.parse_open_interests_history(response, market, since, limit)
 
     def parse_open_interest(self, interest, market: Market = None):
         #
@@ -3521,7 +3650,7 @@ class bitfinex(Exchange, ImplicitAPI):
         :param float amount: how much you want to trade in units of the base currency
         :param float [price]: the price at which the order is to be fulfilled, in units of the quote currency, ignored in market orders
         :param dict [params]: extra parameters specific to the exchange API endpoint
-        :param float [params.stopPrice]: the price that triggers a trigger order
+        :param float [params.triggerPrice]: the price that triggers a trigger order
         :param boolean [params.postOnly]: set to True if you want to make a post only order
         :param boolean [params.reduceOnly]: indicates that the order is to reduce the size of a position
         :param int [params.flags]: additional order parameters: 4096(Post Only), 1024(Reduce Only), 16384(OCO), 64(Hidden), 512(Close), 524288(No Var Rates)
@@ -3539,7 +3668,7 @@ class bitfinex(Exchange, ImplicitAPI):
             amountString = self.amount_to_precision(symbol, amount)
             amountString = amountString if (side == 'buy') else Precise.string_neg(amountString)
             request['amount'] = amountString
-        stopPrice = self.safe_string_2(params, 'stopPrice', 'triggerPrice')
+        triggerPrice = self.safe_string_2(params, 'stopPrice', 'triggerPrice')
         trailingAmount = self.safe_string(params, 'trailingAmount')
         timeInForce = self.safe_string(params, 'timeInForce')
         postOnlyParam = self.safe_bool(params, 'postOnly', False)
@@ -3547,13 +3676,13 @@ class bitfinex(Exchange, ImplicitAPI):
         clientOrderId = self.safe_integer_2(params, 'cid', 'clientOrderId')
         if trailingAmount is not None:
             request['price_trailing'] = trailingAmount
-        elif stopPrice is not None:
+        elif triggerPrice is not None:
             # request['price'] is taken for stop orders
-            request['price'] = self.price_to_precision(symbol, stopPrice)
+            request['price'] = self.price_to_precision(symbol, triggerPrice)
             if type == 'limit':
                 request['price_aux_limit'] = self.price_to_precision(symbol, price)
         postOnly = (postOnlyParam or (timeInForce == 'PO'))
-        if (type != 'market') and (stopPrice is None):
+        if (type != 'market') and (triggerPrice is None):
             request['price'] = self.price_to_precision(symbol, price)
         # flag values may be summed to combine flags
         flags = 0

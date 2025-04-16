@@ -14,13 +14,13 @@ use ccxt\OrderNotFound;
 use ccxt\NotSupported;
 use ccxt\RateLimitExceeded;
 use ccxt\Precise;
-use React\Async;
-use React\Promise;
-use React\Promise\PromiseInterface;
+use \React\Async;
+use \React\Promise;
+use \React\Promise\PromiseInterface;
 
 class bitfinex extends Exchange {
 
-    public function describe() {
+    public function describe(): mixed {
         return $this->deep_extend(parent::describe(), array(
             'id' => 'bitfinex',
             'name' => 'Bitfinex',
@@ -89,6 +89,7 @@ class bitfinex extends Exchange {
                 'fetchOHLCV' => true,
                 'fetchOpenInterest' => true,
                 'fetchOpenInterestHistory' => true,
+                'fetchOpenInterests' => true,
                 'fetchOpenOrder' => true,
                 'fetchOpenOrders' => true,
                 'fetchOrder' => true,
@@ -406,6 +407,83 @@ class bitfinex extends Exchange {
                 ),
                 'networksById' => array(
                     'TETHERUSE' => 'ERC20',
+                ),
+            ),
+            'features' => array(
+                'default' => array(
+                    'sandbox' => false,
+                    'createOrder' => array(
+                        'marginMode' => true,
+                        'triggerPrice' => true,
+                        'triggerPriceType' => null,
+                        'triggerDirection' => false,
+                        'stopLossPrice' => true,
+                        'takeProfitPrice' => true,
+                        'attachedStopLossTakeProfit' => null,
+                        'timeInForce' => array(
+                            'IOC' => true,
+                            'FOK' => true,
+                            'PO' => true,
+                            'GTD' => false,
+                        ),
+                        'hedged' => false,
+                        'trailing' => true, // todo => implement
+                        'leverage' => true, // todo => implement
+                        'marketBuyRequiresPrice' => false,
+                        'marketBuyByCost' => true,
+                        'selfTradePrevention' => false,
+                        'iceberg' => false,
+                    ),
+                    'createOrders' => array(
+                        'max' => 75,
+                    ),
+                    'fetchMyTrades' => array(
+                        'marginMode' => false,
+                        'limit' => 2500,
+                        'daysBack' => null,
+                        'untilDays' => 100000, // todo => implement
+                        'symbolRequired' => false,
+                    ),
+                    'fetchOrder' => array(
+                        'marginMode' => false,
+                        'trigger' => false,
+                        'trailing' => false,
+                        'symbolRequired' => false,
+                    ),
+                    'fetchOpenOrders' => array(
+                        'marginMode' => false,
+                        'limit' => null,
+                        'trigger' => false,
+                        'trailing' => false,
+                        'symbolRequired' => false,
+                    ),
+                    'fetchOrders' => null,
+                    'fetchClosedOrders' => array(
+                        'marginMode' => false,
+                        'limit' => null,
+                        'daysBack' => null,
+                        'daysBackCanceled' => null,
+                        'untilDays' => 100000,
+                        'trigger' => false,
+                        'trailing' => false,
+                        'symbolRequired' => false,
+                    ),
+                    'fetchOHLCV' => array(
+                        'limit' => 10000,
+                    ),
+                ),
+                'spot' => array(
+                    'extends' => 'default',
+                ),
+                'swap' => array(
+                    'linear' => array(
+                        'extends' => 'default',
+                    ),
+                    'inverse' => null,
+                ),
+                'future' => array(
+                    'linear' => null,
+                    'inverse' => null,
                 ),
             ),
             'exceptions' => array(
@@ -1098,7 +1176,8 @@ class bitfinex extends Exchange {
                 $signedAmount = $this->safe_string($order, 2);
                 $amount = Precise::string_abs($signedAmount);
                 $side = Precise::string_gt($signedAmount, '0') ? 'bids' : 'asks';
-                $result[$side][] = array( $price, $this->parse_number($amount) );
+                $resultSide = $result[$side];
+                $resultSide[] = array( $price, $this->parse_number($amount) );
             }
             $result['bids'] = $this->sort_by($result['bids'], 0, true);
             $result['asks'] = $this->sort_by($result['asks'], 0);
@@ -1555,10 +1634,10 @@ class bitfinex extends Exchange {
             }
         }
         $price = $this->safe_string($orderList, 16);
-        $stopPrice = null;
+        $triggerPrice = null;
         if (($orderType === 'EXCHANGE STOP') || ($orderType === 'EXCHANGE STOP LIMIT')) {
             $price = null;
-            $stopPrice = $this->safe_string($orderList, 16);
+            $triggerPrice = $this->safe_string($orderList, 16);
             if ($orderType === 'EXCHANGE STOP LIMIT') {
                 $price = $this->safe_string($orderList, 19);
             }
@@ -1584,8 +1663,7 @@ class bitfinex extends Exchange {
             'postOnly' => $postOnly,
             'side' => $side,
             'price' => $price,
-            'stopPrice' => $stopPrice,
-            'triggerPrice' => $stopPrice,
+            'triggerPrice' => $triggerPrice,
             'amount' => $amount,
             'cost' => null,
             'average' => $average,
@@ -1607,7 +1685,7 @@ class bitfinex extends Exchange {
          * @param {float} $amount how much you want to trade in units of the base currency
          * @param {float} [$price] the $price of the order, in units of the quote currency, ignored in $market orders
          * @param {array} [$params] extra parameters specific to the exchange API endpoint
-         * @param {float} [$params->stopPrice] The $price at which a trigger order is triggered at
+         * @param {float} [$params->triggerPrice] The $price at which a trigger order is triggered at
          * @param {string} [$params->timeInForce] "GTC", "IOC", "FOK", or "PO"
          * @param {bool} [$params->postOnly]
          * @param {bool} [$params->reduceOnly] Ensures that the executed order does not flip the opened position.
@@ -1625,7 +1703,7 @@ class bitfinex extends Exchange {
             'symbol' => $market['id'],
             'amount' => $amountString,
         );
-        $stopPrice = $this->safe_string_2($params, 'stopPrice', 'triggerPrice');
+        $triggerPrice = $this->safe_string_2($params, 'stopPrice', 'triggerPrice');
         $trailingAmount = $this->safe_string($params, 'trailingAmount');
         $timeInForce = $this->safe_string($params, 'timeInForce');
         $postOnlyParam = $this->safe_bool($params, 'postOnly', false);
@@ -1635,9 +1713,9 @@ class bitfinex extends Exchange {
         if ($trailingAmount !== null) {
             $orderType = 'TRAILING STOP';
             $request['price_trailing'] = $trailingAmount;
-        } elseif ($stopPrice !== null) {
+        } elseif ($triggerPrice !== null) {
             // $request['price'] is taken for stop orders
-            $request['price'] = $this->price_to_precision($symbol, $stopPrice);
+            $request['price'] = $this->price_to_precision($symbol, $triggerPrice);
             if ($type === 'limit') {
                 $orderType = 'STOP LIMIT';
                 $request['price_aux_limit'] = $this->price_to_precision($symbol, $price);
@@ -1654,7 +1732,7 @@ class bitfinex extends Exchange {
         if (($ioc || $fok) && ($type === 'market')) {
             throw new InvalidOrder($this->id . ' createOrder() does not allow $market IOC and FOK orders');
         }
-        if (($type !== 'market') && ($stopPrice === null)) {
+        if (($type !== 'market') && ($triggerPrice === null)) {
             $request['price'] = $this->price_to_precision($symbol, $price);
         }
         if ($ioc) {
@@ -1700,7 +1778,7 @@ class bitfinex extends Exchange {
              * @param {float} $amount the $amount of currency to trade
              * @param {float} [$price] $price of the $order
              * @param {array} [$params] extra parameters specific to the exchange API endpoint
-             * @param {float} [$params->stopPrice] the $price that triggers a trigger $order
+             * @param {float} [$params->triggerPrice] the $price that triggers a trigger $order
              * @param {string} [$params->timeInForce] "GTC", "IOC", "FOK", or "PO"
              * @param {boolean} [$params->postOnly] set to true if you want to make a post only $order
              * @param {boolean} [$params->reduceOnly] indicates that the $order is to reduce the size of a position
@@ -2270,7 +2348,7 @@ class bitfinex extends Exchange {
         }) ();
     }
 
-    public function create_deposit_address(string $code, $params = array ()) {
+    public function create_deposit_address(string $code, $params = array ()): PromiseInterface {
         return Async\async(function () use ($code, $params) {
             /**
              * create a currency deposit address
@@ -3051,7 +3129,7 @@ class bitfinex extends Exchange {
              * @param {array} [$params] extra parameters specific to the exchange API endpoint
              * @param {int} [$params->until] timestamp in ms of the latest ledger entry
              * @param {boolean} [$params->paginate] default false, when true will automatically $paginate by calling this endpoint multiple times. See in the docs all the [available parameters](https://github.com/ccxt/ccxt/wiki/Manual#pagination-$params)
-             * @return {array} a ~@link https://docs.ccxt.com/#/?id=ledger-structure ledger structure~
+             * @return {array} a ~@link https://docs.ccxt.com/#/?id=ledger ledger structure~
              */
             Async\await($this->load_markets());
             $paginate = false;
@@ -3150,7 +3228,7 @@ class bitfinex extends Exchange {
             //       )
             //   )
             //
-            return $this->parse_funding_rates($response);
+            return $this->parse_funding_rates($response, $symbols);
         }) ();
     }
 
@@ -3340,6 +3418,61 @@ class bitfinex extends Exchange {
         );
     }
 
+    public function fetch_open_interests(?array $symbols = null, $params = array ()) {
+        return Async\async(function () use ($symbols, $params) {
+            /**
+             * Retrieves the open interest for a list of $symbols
+             *
+             * @see https://docs.bitfinex.com/reference/rest-public-derivatives-status
+             *
+             * @param {string[]} [$symbols] a list of unified CCXT market $symbols
+             * @param {array} [$params] exchange specific parameters
+             * @return {array[]} a list of ~@link https://docs.ccxt.com/#/?id=open-interest-structure open interest structures~
+             */
+            Async\await($this->load_markets());
+            $symbols = $this->market_symbols($symbols);
+            $marketIds = array( 'ALL' );
+            if ($symbols !== null) {
+                $marketIds = $this->market_ids($symbols);
+            }
+            $request = array(
+                'keys' => implode(',', $marketIds),
+            );
+            $response = Async\await($this->publicGetStatusDeriv ($this->extend($request, $params)));
+            //
+            //     array(
+            //         array(
+            //             "tXRPF0:USTF0",  // market id
+            //             1706256986000,   // millisecond timestamp
+            //             null,
+            //             0.512705,        // derivative mid price
+            //             0.512395,        // underlying spot mid price
+            //             null,
+            //             37671483.04,     // insurance fund balance
+            //             null,
+            //             1706284800000,   // timestamp of next funding
+            //             0.00002353,      // accrued funding for next period
+            //             317,             // next funding step
+            //             null,
+            //             0,               // current funding
+            //             null,
+            //             null,
+            //             0.5123016,       // mark price
+            //             null,
+            //             null,
+            //             2233562.03115,   // open interest in contracts
+            //             null,
+            //             null,
+            //             null,
+            //             0.0005,          // average spread without funding payment
+            //             0.0025           // funding payment cap
+            //         )
+            //     )
+            //
+            return $this->parse_open_interests($response, $symbols);
+        }) ();
+    }
+
     public function fetch_open_interest(string $symbol, $params = array ()) {
         return Async\async(function () use ($symbol, $params) {
             /**
@@ -3455,7 +3588,7 @@ class bitfinex extends Exchange {
             //         ),
             //     )
             //
-            return $this->parse_open_interests($response, $market, $since, $limit);
+            return $this->parse_open_interests_history($response, $market, $since, $limit);
         }) ();
     }
 
@@ -3770,7 +3903,7 @@ class bitfinex extends Exchange {
              * @param {float} $amount how much you want to trade in units of the base currency
              * @param {float} [$price] the $price at which the $order is to be fulfilled, in units of the quote currency, ignored in $market orders
              * @param {array} [$params] extra parameters specific to the exchange API endpoint
-             * @param {float} [$params->stopPrice] the $price that triggers a trigger $order
+             * @param {float} [$params->triggerPrice] the $price that triggers a trigger $order
              * @param {boolean} [$params->postOnly] set to true if you want to make a post only $order
              * @param {boolean} [$params->reduceOnly] indicates that the $order is to reduce the size of a position
              * @param {int} [$params->flags] additional $order parameters => 4096 (Post Only), 1024 (Reduce Only), 16384 (OCO), 64 (Hidden), 512 (Close), 524288 (No Var Rates)
@@ -3789,7 +3922,7 @@ class bitfinex extends Exchange {
                 $amountString = ($side === 'buy') ? $amountString : Precise::string_neg($amountString);
                 $request['amount'] = $amountString;
             }
-            $stopPrice = $this->safe_string_2($params, 'stopPrice', 'triggerPrice');
+            $triggerPrice = $this->safe_string_2($params, 'stopPrice', 'triggerPrice');
             $trailingAmount = $this->safe_string($params, 'trailingAmount');
             $timeInForce = $this->safe_string($params, 'timeInForce');
             $postOnlyParam = $this->safe_bool($params, 'postOnly', false);
@@ -3797,15 +3930,15 @@ class bitfinex extends Exchange {
             $clientOrderId = $this->safe_integer_2($params, 'cid', 'clientOrderId');
             if ($trailingAmount !== null) {
                 $request['price_trailing'] = $trailingAmount;
-            } elseif ($stopPrice !== null) {
+            } elseif ($triggerPrice !== null) {
                 // $request['price'] is taken for stop orders
-                $request['price'] = $this->price_to_precision($symbol, $stopPrice);
+                $request['price'] = $this->price_to_precision($symbol, $triggerPrice);
                 if ($type === 'limit') {
                     $request['price_aux_limit'] = $this->price_to_precision($symbol, $price);
                 }
             }
             $postOnly = ($postOnlyParam || ($timeInForce === 'PO'));
-            if (($type !== 'market') && ($stopPrice === null)) {
+            if (($type !== 'market') && ($triggerPrice === null)) {
                 $request['price'] = $this->price_to_precision($symbol, $price);
             }
             // flag values may be summed to combine $flags

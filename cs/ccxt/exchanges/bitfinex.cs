@@ -74,6 +74,7 @@ public partial class bitfinex : Exchange
                 { "fetchOHLCV", true },
                 { "fetchOpenInterest", true },
                 { "fetchOpenInterestHistory", true },
+                { "fetchOpenInterests", true },
                 { "fetchOpenOrder", true },
                 { "fetchOpenOrders", true },
                 { "fetchOrder", true },
@@ -347,6 +348,83 @@ public partial class bitfinex : Exchange
                 } },
                 { "networksById", new Dictionary<string, object>() {
                     { "TETHERUSE", "ERC20" },
+                } },
+            } },
+            { "features", new Dictionary<string, object>() {
+                { "default", new Dictionary<string, object>() {
+                    { "sandbox", false },
+                    { "createOrder", new Dictionary<string, object>() {
+                        { "marginMode", true },
+                        { "triggerPrice", true },
+                        { "triggerPriceType", null },
+                        { "triggerDirection", false },
+                        { "stopLossPrice", true },
+                        { "takeProfitPrice", true },
+                        { "attachedStopLossTakeProfit", null },
+                        { "timeInForce", new Dictionary<string, object>() {
+                            { "IOC", true },
+                            { "FOK", true },
+                            { "PO", true },
+                            { "GTD", false },
+                        } },
+                        { "hedged", false },
+                        { "trailing", true },
+                        { "leverage", true },
+                        { "marketBuyRequiresPrice", false },
+                        { "marketBuyByCost", true },
+                        { "selfTradePrevention", false },
+                        { "iceberg", false },
+                    } },
+                    { "createOrders", new Dictionary<string, object>() {
+                        { "max", 75 },
+                    } },
+                    { "fetchMyTrades", new Dictionary<string, object>() {
+                        { "marginMode", false },
+                        { "limit", 2500 },
+                        { "daysBack", null },
+                        { "untilDays", 100000 },
+                        { "symbolRequired", false },
+                    } },
+                    { "fetchOrder", new Dictionary<string, object>() {
+                        { "marginMode", false },
+                        { "trigger", false },
+                        { "trailing", false },
+                        { "symbolRequired", false },
+                    } },
+                    { "fetchOpenOrders", new Dictionary<string, object>() {
+                        { "marginMode", false },
+                        { "limit", null },
+                        { "trigger", false },
+                        { "trailing", false },
+                        { "symbolRequired", false },
+                    } },
+                    { "fetchOrders", null },
+                    { "fetchClosedOrders", new Dictionary<string, object>() {
+                        { "marginMode", false },
+                        { "limit", null },
+                        { "daysBack", null },
+                        { "daysBackCanceled", null },
+                        { "untilDays", 100000 },
+                        { "trigger", false },
+                        { "trailing", false },
+                        { "symbolRequired", false },
+                    } },
+                    { "fetchOHLCV", new Dictionary<string, object>() {
+                        { "limit", 10000 },
+                    } },
+                } },
+                { "spot", new Dictionary<string, object>() {
+                    { "extends", "default" },
+                } },
+                { "swap", new Dictionary<string, object>() {
+                    { "linear", new Dictionary<string, object>() {
+                        { "extends", "default" },
+                    } },
+                    { "inverse", null },
+                } },
+                { "future", new Dictionary<string, object>() {
+                    { "linear", null },
+                    { "inverse", null },
                 } },
             } },
             { "exceptions", new Dictionary<string, object>() {
@@ -1072,7 +1150,8 @@ public partial class bitfinex : Exchange
             object signedAmount = this.safeString(order, 2);
             object amount = Precise.stringAbs(signedAmount);
             object side = ((bool) isTrue(Precise.stringGt(signedAmount, "0"))) ? "bids" : "asks";
-            ((IList<object>)getValue(result, side)).Add(new List<object>() {price, this.parseNumber(amount)});
+            object resultSide = getValue(result, side);
+            ((IList<object>)resultSide).Add(new List<object>() {price, this.parseNumber(amount)});
         }
         ((IDictionary<string,object>)result)["bids"] = this.sortBy(getValue(result, "bids"), 0, true);
         ((IDictionary<string,object>)result)["asks"] = this.sortBy(getValue(result, "asks"), 0);
@@ -1558,11 +1637,11 @@ public partial class bitfinex : Exchange
             }
         }
         object price = this.safeString(orderList, 16);
-        object stopPrice = null;
+        object triggerPrice = null;
         if (isTrue(isTrue((isEqual(orderType, "EXCHANGE STOP"))) || isTrue((isEqual(orderType, "EXCHANGE STOP LIMIT")))))
         {
             price = null;
-            stopPrice = this.safeString(orderList, 16);
+            triggerPrice = this.safeString(orderList, 16);
             if (isTrue(isEqual(orderType, "EXCHANGE STOP LIMIT")))
             {
                 price = this.safeString(orderList, 19);
@@ -1590,8 +1669,7 @@ public partial class bitfinex : Exchange
             { "postOnly", postOnly },
             { "side", side },
             { "price", price },
-            { "stopPrice", stopPrice },
-            { "triggerPrice", stopPrice },
+            { "triggerPrice", triggerPrice },
             { "amount", amount },
             { "cost", null },
             { "average", average },
@@ -1616,7 +1694,7 @@ public partial class bitfinex : Exchange
         * @param {float} amount how much you want to trade in units of the base currency
         * @param {float} [price] the price of the order, in units of the quote currency, ignored in market orders
         * @param {object} [params] extra parameters specific to the exchange API endpoint
-        * @param {float} [params.stopPrice] The price at which a trigger order is triggered at
+        * @param {float} [params.triggerPrice] The price at which a trigger order is triggered at
         * @param {string} [params.timeInForce] "GTC", "IOC", "FOK", or "PO"
         * @param {bool} [params.postOnly]
         * @param {bool} [params.reduceOnly] Ensures that the executed order does not flip the opened position.
@@ -1635,7 +1713,7 @@ public partial class bitfinex : Exchange
             { "symbol", getValue(market, "id") },
             { "amount", amountString },
         };
-        object stopPrice = this.safeString2(parameters, "stopPrice", "triggerPrice");
+        object triggerPrice = this.safeString2(parameters, "stopPrice", "triggerPrice");
         object trailingAmount = this.safeString(parameters, "trailingAmount");
         object timeInForce = this.safeString(parameters, "timeInForce");
         object postOnlyParam = this.safeBool(parameters, "postOnly", false);
@@ -1646,10 +1724,10 @@ public partial class bitfinex : Exchange
         {
             orderType = "TRAILING STOP";
             ((IDictionary<string,object>)request)["price_trailing"] = trailingAmount;
-        } else if (isTrue(!isEqual(stopPrice, null)))
+        } else if (isTrue(!isEqual(triggerPrice, null)))
         {
-            // request['price'] is taken as stopPrice for stop orders
-            ((IDictionary<string,object>)request)["price"] = this.priceToPrecision(symbol, stopPrice);
+            // request['price'] is taken as triggerPrice for stop orders
+            ((IDictionary<string,object>)request)["price"] = this.priceToPrecision(symbol, triggerPrice);
             if (isTrue(isEqual(type, "limit")))
             {
                 orderType = "STOP LIMIT";
@@ -1670,7 +1748,7 @@ public partial class bitfinex : Exchange
         {
             throw new InvalidOrder ((string)add(this.id, " createOrder() does not allow market IOC and FOK orders")) ;
         }
-        if (isTrue(isTrue((!isEqual(type, "market"))) && isTrue((isEqual(stopPrice, null)))))
+        if (isTrue(isTrue((!isEqual(type, "market"))) && isTrue((isEqual(triggerPrice, null)))))
         {
             ((IDictionary<string,object>)request)["price"] = this.priceToPrecision(symbol, price);
         }
@@ -1724,7 +1802,7 @@ public partial class bitfinex : Exchange
      * @param {float} amount the amount of currency to trade
      * @param {float} [price] price of the order
      * @param {object} [params] extra parameters specific to the exchange API endpoint
-     * @param {float} [params.stopPrice] the price that triggers a trigger order
+     * @param {float} [params.triggerPrice] the price that triggers a trigger order
      * @param {string} [params.timeInForce] "GTC", "IOC", "FOK", or "PO"
      * @param {boolean} [params.postOnly] set to true if you want to make a post only order
      * @param {boolean} [params.reduceOnly] indicates that the order is to reduce the size of a position
@@ -3187,7 +3265,7 @@ public partial class bitfinex : Exchange
      * @param {object} [params] extra parameters specific to the exchange API endpoint
      * @param {int} [params.until] timestamp in ms of the latest ledger entry
      * @param {boolean} [params.paginate] default false, when true will automatically paginate by calling this endpoint multiple times. See in the docs all the [available parameters](https://github.com/ccxt/ccxt/wiki/Manual#pagination-params)
-     * @returns {object} a [ledger structure]{@link https://docs.ccxt.com/#/?id=ledger-structure}
+     * @returns {object} a [ledger structure]{@link https://docs.ccxt.com/#/?id=ledger}
      */
     public async override Task<object> fetchLedger(object code = null, object since = null, object limit = null, object parameters = null)
     {
@@ -3302,7 +3380,7 @@ public partial class bitfinex : Exchange
         //       ]
         //   ]
         //
-        return this.parseFundingRates(response);
+        return this.parseFundingRates(response, symbols);
     }
 
     /**
@@ -3504,6 +3582,62 @@ public partial class bitfinex : Exchange
 
     /**
      * @method
+     * @name bitfinex#fetchOpenInterests
+     * @description Retrieves the open interest for a list of symbols
+     * @see https://docs.bitfinex.com/reference/rest-public-derivatives-status
+     * @param {string[]} [symbols] a list of unified CCXT market symbols
+     * @param {object} [params] exchange specific parameters
+     * @returns {object[]} a list of [open interest structures]{@link https://docs.ccxt.com/#/?id=open-interest-structure}
+     */
+    public async override Task<object> fetchOpenInterests(object symbols = null, object parameters = null)
+    {
+        parameters ??= new Dictionary<string, object>();
+        await this.loadMarkets();
+        symbols = this.marketSymbols(symbols);
+        object marketIds = new List<object>() {"ALL"};
+        if (isTrue(!isEqual(symbols, null)))
+        {
+            marketIds = this.marketIds(symbols);
+        }
+        object request = new Dictionary<string, object>() {
+            { "keys", String.Join(",", ((IList<object>)marketIds).ToArray()) },
+        };
+        object response = await this.publicGetStatusDeriv(this.extend(request, parameters));
+        //
+        //     [
+        //         [
+        //             "tXRPF0:USTF0",  // market id
+        //             1706256986000,   // millisecond timestamp
+        //             null,
+        //             0.512705,        // derivative mid price
+        //             0.512395,        // underlying spot mid price
+        //             null,
+        //             37671483.04,     // insurance fund balance
+        //             null,
+        //             1706284800000,   // timestamp of next funding
+        //             0.00002353,      // accrued funding for next period
+        //             317,             // next funding step
+        //             null,
+        //             0,               // current funding
+        //             null,
+        //             null,
+        //             0.5123016,       // mark price
+        //             null,
+        //             null,
+        //             2233562.03115,   // open interest in contracts
+        //             null,
+        //             null,
+        //             null,
+        //             0.0005,          // average spread without funding payment
+        //             0.0025           // funding payment cap
+        //         ]
+        //     ]
+        //
+        return this.parseOpenInterests(response, symbols);
+    }
+
+    /**
+     * @method
      * @name bitfinex#fetchOpenInterest
      * @description retrieves the open interest of a contract trading pair
      * @see https://docs.bitfinex.com/reference/rest-public-derivatives-status
@@ -3626,7 +3760,7 @@ public partial class bitfinex : Exchange
         //         ],
         //     ]
         //
-        return this.parseOpenInterests(response, market, since, limit);
+        return this.parseOpenInterestsHistory(response, market, since, limit);
     }
 
     public override object parseOpenInterest(object interest, object market = null)
@@ -3953,7 +4087,7 @@ public partial class bitfinex : Exchange
      * @param {float} amount how much you want to trade in units of the base currency
      * @param {float} [price] the price at which the order is to be fulfilled, in units of the quote currency, ignored in market orders
      * @param {object} [params] extra parameters specific to the exchange API endpoint
-     * @param {float} [params.stopPrice] the price that triggers a trigger order
+     * @param {float} [params.triggerPrice] the price that triggers a trigger order
      * @param {boolean} [params.postOnly] set to true if you want to make a post only order
      * @param {boolean} [params.reduceOnly] indicates that the order is to reduce the size of a position
      * @param {int} [params.flags] additional order parameters: 4096 (Post Only), 1024 (Reduce Only), 16384 (OCO), 64 (Hidden), 512 (Close), 524288 (No Var Rates)
@@ -3976,7 +4110,7 @@ public partial class bitfinex : Exchange
             amountString = ((bool) isTrue((isEqual(side, "buy")))) ? amountString : Precise.stringNeg(amountString);
             ((IDictionary<string,object>)request)["amount"] = amountString;
         }
-        object stopPrice = this.safeString2(parameters, "stopPrice", "triggerPrice");
+        object triggerPrice = this.safeString2(parameters, "stopPrice", "triggerPrice");
         object trailingAmount = this.safeString(parameters, "trailingAmount");
         object timeInForce = this.safeString(parameters, "timeInForce");
         object postOnlyParam = this.safeBool(parameters, "postOnly", false);
@@ -3985,17 +4119,17 @@ public partial class bitfinex : Exchange
         if (isTrue(!isEqual(trailingAmount, null)))
         {
             ((IDictionary<string,object>)request)["price_trailing"] = trailingAmount;
-        } else if (isTrue(!isEqual(stopPrice, null)))
+        } else if (isTrue(!isEqual(triggerPrice, null)))
         {
-            // request['price'] is taken as stopPrice for stop orders
-            ((IDictionary<string,object>)request)["price"] = this.priceToPrecision(symbol, stopPrice);
+            // request['price'] is taken as triggerPrice for stop orders
+            ((IDictionary<string,object>)request)["price"] = this.priceToPrecision(symbol, triggerPrice);
             if (isTrue(isEqual(type, "limit")))
             {
                 ((IDictionary<string,object>)request)["price_aux_limit"] = this.priceToPrecision(symbol, price);
             }
         }
         object postOnly = (isTrue(postOnlyParam) || isTrue((isEqual(timeInForce, "PO"))));
-        if (isTrue(isTrue((!isEqual(type, "market"))) && isTrue((isEqual(stopPrice, null)))))
+        if (isTrue(isTrue((!isEqual(type, "market"))) && isTrue((isEqual(triggerPrice, null)))))
         {
             ((IDictionary<string,object>)request)["price"] = this.priceToPrecision(symbol, price);
         }

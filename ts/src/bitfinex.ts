@@ -4,7 +4,7 @@ import { Precise } from './base/Precise.js';
 import Exchange from './abstract/bitfinex.js';
 import { SIGNIFICANT_DIGITS, DECIMAL_PLACES, TRUNCATE, ROUND } from './base/functions/number.js';
 import { sha384 } from './static_dependencies/noble-hashes/sha512.js';
-import type { TransferEntry, Int, OrderSide, OrderType, Trade, OHLCV, Order, FundingRateHistory, OrderBook, Str, Transaction, Ticker, Balances, Tickers, Strings, Currency, Market, OpenInterest, Liquidation, OrderRequest, Num, MarginModification, Currencies, TradingFees, Dict, LedgerEntry, FundingRate, FundingRates, DepositAddress } from './base/types.js';
+import type { TransferEntry, Int, OrderSide, OrderType, Trade, OHLCV, Order, FundingRateHistory, OrderBook, Str, Transaction, Ticker, Balances, Tickers, Strings, Currency, Market, OpenInterest, Liquidation, OrderRequest, Num, MarginModification, Currencies, TradingFees, Dict, LedgerEntry, FundingRate, FundingRates, DepositAddress, OpenInterests } from './base/types.js';
 
 // ---------------------------------------------------------------------------
 
@@ -13,7 +13,7 @@ import type { TransferEntry, Int, OrderSide, OrderType, Trade, OHLCV, Order, Fun
  * @augments Exchange
  */
 export default class bitfinex extends Exchange {
-    describe () {
+    describe (): any {
         return this.deepExtend (super.describe (), {
             'id': 'bitfinex',
             'name': 'Bitfinex',
@@ -82,6 +82,7 @@ export default class bitfinex extends Exchange {
                 'fetchOHLCV': true,
                 'fetchOpenInterest': true,
                 'fetchOpenInterestHistory': true,
+                'fetchOpenInterests': true,
                 'fetchOpenOrder': true,
                 'fetchOpenOrders': true,
                 'fetchOrder': true,
@@ -399,6 +400,83 @@ export default class bitfinex extends Exchange {
                 },
                 'networksById': {
                     'TETHERUSE': 'ERC20',
+                },
+            },
+            'features': {
+                'default': {
+                    'sandbox': false,
+                    'createOrder': {
+                        'marginMode': true,
+                        'triggerPrice': true,
+                        'triggerPriceType': undefined,
+                        'triggerDirection': false,
+                        'stopLossPrice': true,
+                        'takeProfitPrice': true,
+                        'attachedStopLossTakeProfit': undefined,
+                        'timeInForce': {
+                            'IOC': true,
+                            'FOK': true,
+                            'PO': true,
+                            'GTD': false,
+                        },
+                        'hedged': false,
+                        'trailing': true, // todo: implement
+                        'leverage': true, // todo: implement
+                        'marketBuyRequiresPrice': false,
+                        'marketBuyByCost': true,
+                        'selfTradePrevention': false,
+                        'iceberg': false,
+                    },
+                    'createOrders': {
+                        'max': 75,
+                    },
+                    'fetchMyTrades': {
+                        'marginMode': false,
+                        'limit': 2500,
+                        'daysBack': undefined,
+                        'untilDays': 100000, // todo: implement
+                        'symbolRequired': false,
+                    },
+                    'fetchOrder': {
+                        'marginMode': false,
+                        'trigger': false,
+                        'trailing': false,
+                        'symbolRequired': false,
+                    },
+                    'fetchOpenOrders': {
+                        'marginMode': false,
+                        'limit': undefined,
+                        'trigger': false,
+                        'trailing': false,
+                        'symbolRequired': false,
+                    },
+                    'fetchOrders': undefined,
+                    'fetchClosedOrders': {
+                        'marginMode': false,
+                        'limit': undefined,
+                        'daysBack': undefined,
+                        'daysBackCanceled': undefined,
+                        'untilDays': 100000,
+                        'trigger': false,
+                        'trailing': false,
+                        'symbolRequired': false,
+                    },
+                    'fetchOHLCV': {
+                        'limit': 10000,
+                    },
+                },
+                'spot': {
+                    'extends': 'default',
+                },
+                'swap': {
+                    'linear': {
+                        'extends': 'default',
+                    },
+                    'inverse': undefined,
+                },
+                'future': {
+                    'linear': undefined,
+                    'inverse': undefined,
                 },
             },
             'exceptions': {
@@ -1080,7 +1158,8 @@ export default class bitfinex extends Exchange {
             const signedAmount = this.safeString (order, 2);
             const amount = Precise.stringAbs (signedAmount);
             const side = Precise.stringGt (signedAmount, '0') ? 'bids' : 'asks';
-            result[side].push ([ price, this.parseNumber (amount) ]);
+            const resultSide = result[side];
+            resultSide.push ([ price, this.parseNumber (amount) ]);
         }
         result['bids'] = this.sortBy (result['bids'], 0, true);
         result['asks'] = this.sortBy (result['asks'], 0);
@@ -1528,10 +1607,10 @@ export default class bitfinex extends Exchange {
             }
         }
         let price = this.safeString (orderList, 16);
-        let stopPrice = undefined;
+        let triggerPrice = undefined;
         if ((orderType === 'EXCHANGE STOP') || (orderType === 'EXCHANGE STOP LIMIT')) {
             price = undefined;
-            stopPrice = this.safeString (orderList, 16);
+            triggerPrice = this.safeString (orderList, 16);
             if (orderType === 'EXCHANGE STOP LIMIT') {
                 price = this.safeString (orderList, 19);
             }
@@ -1557,8 +1636,7 @@ export default class bitfinex extends Exchange {
             'postOnly': postOnly,
             'side': side,
             'price': price,
-            'stopPrice': stopPrice,
-            'triggerPrice': stopPrice,
+            'triggerPrice': triggerPrice,
             'amount': amount,
             'cost': undefined,
             'average': average,
@@ -1582,7 +1660,7 @@ export default class bitfinex extends Exchange {
          * @param {float} amount how much you want to trade in units of the base currency
          * @param {float} [price] the price of the order, in units of the quote currency, ignored in market orders
          * @param {object} [params] extra parameters specific to the exchange API endpoint
-         * @param {float} [params.stopPrice] The price at which a trigger order is triggered at
+         * @param {float} [params.triggerPrice] The price at which a trigger order is triggered at
          * @param {string} [params.timeInForce] "GTC", "IOC", "FOK", or "PO"
          * @param {bool} [params.postOnly]
          * @param {bool} [params.reduceOnly] Ensures that the executed order does not flip the opened position.
@@ -1600,7 +1678,7 @@ export default class bitfinex extends Exchange {
             'symbol': market['id'],
             'amount': amountString,
         };
-        const stopPrice = this.safeString2 (params, 'stopPrice', 'triggerPrice');
+        const triggerPrice = this.safeString2 (params, 'stopPrice', 'triggerPrice');
         const trailingAmount = this.safeString (params, 'trailingAmount');
         const timeInForce = this.safeString (params, 'timeInForce');
         const postOnlyParam = this.safeBool (params, 'postOnly', false);
@@ -1610,9 +1688,9 @@ export default class bitfinex extends Exchange {
         if (trailingAmount !== undefined) {
             orderType = 'TRAILING STOP';
             request['price_trailing'] = trailingAmount;
-        } else if (stopPrice !== undefined) {
-            // request['price'] is taken as stopPrice for stop orders
-            request['price'] = this.priceToPrecision (symbol, stopPrice);
+        } else if (triggerPrice !== undefined) {
+            // request['price'] is taken as triggerPrice for stop orders
+            request['price'] = this.priceToPrecision (symbol, triggerPrice);
             if (type === 'limit') {
                 orderType = 'STOP LIMIT';
                 request['price_aux_limit'] = this.priceToPrecision (symbol, price);
@@ -1629,7 +1707,7 @@ export default class bitfinex extends Exchange {
         if ((ioc || fok) && (type === 'market')) {
             throw new InvalidOrder (this.id + ' createOrder() does not allow market IOC and FOK orders');
         }
-        if ((type !== 'market') && (stopPrice === undefined)) {
+        if ((type !== 'market') && (triggerPrice === undefined)) {
             request['price'] = this.priceToPrecision (symbol, price);
         }
         if (ioc) {
@@ -1673,7 +1751,7 @@ export default class bitfinex extends Exchange {
      * @param {float} amount the amount of currency to trade
      * @param {float} [price] price of the order
      * @param {object} [params] extra parameters specific to the exchange API endpoint
-     * @param {float} [params.stopPrice] the price that triggers a trigger order
+     * @param {float} [params.triggerPrice] the price that triggers a trigger order
      * @param {string} [params.timeInForce] "GTC", "IOC", "FOK", or "PO"
      * @param {boolean} [params.postOnly] set to true if you want to make a post only order
      * @param {boolean} [params.reduceOnly] indicates that the order is to reduce the size of a position
@@ -2232,7 +2310,7 @@ export default class bitfinex extends Exchange {
      * @param {object} [params] extra parameters specific to the exchange API endpoint
      * @returns {object} an [address structure]{@link https://docs.ccxt.com/#/?id=address-structure}
      */
-    async createDepositAddress (code: string, params = {}) {
+    async createDepositAddress (code: string, params = {}): Promise<DepositAddress> {
         await this.loadMarkets ();
         const request: Dict = {
             'op_renew': 1,
@@ -2990,7 +3068,7 @@ export default class bitfinex extends Exchange {
      * @param {object} [params] extra parameters specific to the exchange API endpoint
      * @param {int} [params.until] timestamp in ms of the latest ledger entry
      * @param {boolean} [params.paginate] default false, when true will automatically paginate by calling this endpoint multiple times. See in the docs all the [available parameters](https://github.com/ccxt/ccxt/wiki/Manual#pagination-params)
-     * @returns {object} a [ledger structure]{@link https://docs.ccxt.com/#/?id=ledger-structure}
+     * @returns {object} a [ledger structure]{@link https://docs.ccxt.com/#/?id=ledger}
      */
     async fetchLedger (code: Str = undefined, since: Int = undefined, limit: Int = undefined, params = {}): Promise<LedgerEntry[]> {
         await this.loadMarkets ();
@@ -3088,7 +3166,7 @@ export default class bitfinex extends Exchange {
         //       ]
         //   ]
         //
-        return this.parseFundingRates (response);
+        return this.parseFundingRates (response, symbols);
     }
 
     /**
@@ -3277,6 +3355,59 @@ export default class bitfinex extends Exchange {
 
     /**
      * @method
+     * @name bitfinex#fetchOpenInterests
+     * @description Retrieves the open interest for a list of symbols
+     * @see https://docs.bitfinex.com/reference/rest-public-derivatives-status
+     * @param {string[]} [symbols] a list of unified CCXT market symbols
+     * @param {object} [params] exchange specific parameters
+     * @returns {object[]} a list of [open interest structures]{@link https://docs.ccxt.com/#/?id=open-interest-structure}
+     */
+    async fetchOpenInterests (symbols: Strings = undefined, params = {}) {
+        await this.loadMarkets ();
+        symbols = this.marketSymbols (symbols);
+        let marketIds = [ 'ALL' ];
+        if (symbols !== undefined) {
+            marketIds = this.marketIds (symbols);
+        }
+        const request: Dict = {
+            'keys': marketIds.join (','),
+        };
+        const response = await this.publicGetStatusDeriv (this.extend (request, params));
+        //
+        //     [
+        //         [
+        //             "tXRPF0:USTF0",  // market id
+        //             1706256986000,   // millisecond timestamp
+        //             null,
+        //             0.512705,        // derivative mid price
+        //             0.512395,        // underlying spot mid price
+        //             null,
+        //             37671483.04,     // insurance fund balance
+        //             null,
+        //             1706284800000,   // timestamp of next funding
+        //             0.00002353,      // accrued funding for next period
+        //             317,             // next funding step
+        //             null,
+        //             0,               // current funding
+        //             null,
+        //             null,
+        //             0.5123016,       // mark price
+        //             null,
+        //             null,
+        //             2233562.03115,   // open interest in contracts
+        //             null,
+        //             null,
+        //             null,
+        //             0.0005,          // average spread without funding payment
+        //             0.0025           // funding payment cap
+        //         ]
+        //     ]
+        //
+        return this.parseOpenInterests (response, symbols) as OpenInterests;
+    }
+
+    /**
+     * @method
      * @name bitfinex#fetchOpenInterest
      * @description retrieves the open interest of a contract trading pair
      * @see https://docs.bitfinex.com/reference/rest-public-derivatives-status
@@ -3387,7 +3518,7 @@ export default class bitfinex extends Exchange {
         //         ],
         //     ]
         //
-        return this.parseOpenInterests (response, market, since, limit);
+        return this.parseOpenInterestsHistory (response, market, since, limit);
     }
 
     parseOpenInterest (interest, market: Market = undefined) {
@@ -3693,7 +3824,7 @@ export default class bitfinex extends Exchange {
      * @param {float} amount how much you want to trade in units of the base currency
      * @param {float} [price] the price at which the order is to be fulfilled, in units of the quote currency, ignored in market orders
      * @param {object} [params] extra parameters specific to the exchange API endpoint
-     * @param {float} [params.stopPrice] the price that triggers a trigger order
+     * @param {float} [params.triggerPrice] the price that triggers a trigger order
      * @param {boolean} [params.postOnly] set to true if you want to make a post only order
      * @param {boolean} [params.reduceOnly] indicates that the order is to reduce the size of a position
      * @param {int} [params.flags] additional order parameters: 4096 (Post Only), 1024 (Reduce Only), 16384 (OCO), 64 (Hidden), 512 (Close), 524288 (No Var Rates)
@@ -3713,7 +3844,7 @@ export default class bitfinex extends Exchange {
             amountString = (side === 'buy') ? amountString : Precise.stringNeg (amountString);
             request['amount'] = amountString;
         }
-        const stopPrice = this.safeString2 (params, 'stopPrice', 'triggerPrice');
+        const triggerPrice = this.safeString2 (params, 'stopPrice', 'triggerPrice');
         const trailingAmount = this.safeString (params, 'trailingAmount');
         const timeInForce = this.safeString (params, 'timeInForce');
         const postOnlyParam = this.safeBool (params, 'postOnly', false);
@@ -3721,15 +3852,15 @@ export default class bitfinex extends Exchange {
         const clientOrderId = this.safeInteger2 (params, 'cid', 'clientOrderId');
         if (trailingAmount !== undefined) {
             request['price_trailing'] = trailingAmount;
-        } else if (stopPrice !== undefined) {
-            // request['price'] is taken as stopPrice for stop orders
-            request['price'] = this.priceToPrecision (symbol, stopPrice);
+        } else if (triggerPrice !== undefined) {
+            // request['price'] is taken as triggerPrice for stop orders
+            request['price'] = this.priceToPrecision (symbol, triggerPrice);
             if (type === 'limit') {
                 request['price_aux_limit'] = this.priceToPrecision (symbol, price);
             }
         }
         const postOnly = (postOnlyParam || (timeInForce === 'PO'));
-        if ((type !== 'market') && (stopPrice === undefined)) {
+        if ((type !== 'market') && (triggerPrice === undefined)) {
             request['price'] = this.priceToPrecision (symbol, price);
         }
         // flag values may be summed to combine flags
